@@ -1,2 +1,2 @@
 # agriculture-segmenter
-Project in UT course Data Science in Remote Sensing
+Project in the UT course Data Science in Remote Sensing
