@@ -8,17 +8,35 @@ import numpy as np
 from skimage.feature import peak_local_max
 from skimage.morphology import watershed
 from scipy import ndimage
+from matplotlib import pyplot as plt
 
 import imutils
 
 import cv2
 
-def segment(image_path):
-    image = read_image(image_path)
+
+def read_write_test(input_path, output_path):
+    with rasterio.open(input_path) as input_dataset:
+        raster = input_dataset.read()
+        image = reshape_as_image(raster)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        segment_mask, thresholded_image = segment(image)
+        result = np.append(raster, [segment_mask], axis=0)
+
+        profile = input_dataset.profile
+        profile.update(count=4)
+
+        with rasterio.open(output_path, 'w', **profile) as output_dataset:
+            output_dataset.write(result)
+
+
+def segment(image):
     thresholded_image, gray = otsu_thresholding(image)
     labels = watershed_segment(thresholded_image)
-    draw_labels(image, gray, labels)
-    return image, thresholded_image
+    segment_mask = draw_labels(image, gray, labels)
+    return segment_mask, thresholded_image
+
 
 def read_image(image_path):
     raster = rasterio.open(image_path).read()
@@ -26,13 +44,13 @@ def read_image(image_path):
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return image
 
+
 def otsu_thresholding(image):
     shifted = cv2.pyrMeanShiftFiltering(image, 21, 51)
-
     gray = cv2.cvtColor(shifted, cv2.COLOR_BGR2GRAY)
-    tresholded_image = cv2.threshold(gray, 0, 255,
-                           cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    return (tresholded_image, gray)
+    tresholded_image = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+    return tresholded_image, gray
+
 
 def watershed_segment(thresholded_image):
     # compute the exact Euclidean distance from every binary
@@ -47,9 +65,15 @@ def watershed_segment(thresholded_image):
     print("[INFO] {} unique segments found".format(len(np.unique(labels)) - 1))
     return labels
 
+
 # TODO: passing gray should not be needed
 def draw_labels(image, gray, labels):
-    for label in np.unique(labels):
+    unique_labels = np.unique(labels)
+    n_labels = len(unique_labels)
+    cmap = plt.cm.get_cmap('gray', n_labels)
+    result = np.zeros(gray.shape, dtype="uint8")
+
+    for i_label, label in enumerate(unique_labels):
         # if the label is zero, we are examining the 'background'
         # so simply ignore it
         if label == 0:
@@ -62,13 +86,15 @@ def draw_labels(image, gray, labels):
 
         # detect contours in the mask and grab the largest one
         cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
         cnts = imutils.grab_contours(cnts)
 
         for (i, c) in enumerate(cnts):
             # draw the contour
-            ((x, y), _) = cv2.minEnclosingCircle(c)
+            # ((x, y), _) = cv2.minEnclosingCircle(c)
             # cv2.putText(image, "#{}".format(i + 1), (int(x) - 10, int(y)),
             #    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.drawContours(image, [c], -1, (255, 0, 0), 2)
-            cv2.fillPoly(image, pts=[c], color=(0, 255, 0))
+            # cv2.drawContours(image, [c], -1, (255, 0, 0), 2)
+            segment_color = cmap(i_label, alpha=0, bytes=True)
+            cv2.fillPoly(result, pts=[c], color=(segment_color[0].item(), segment_color[1].item(), segment_color[2].item()))
+
+    return result
