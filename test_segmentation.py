@@ -1,3 +1,6 @@
 import segmenter as seg
 
-seg.read_write_test('data/tile_1024_5632.tif', 'output/tile_1024_5632_seg.tif')
+seg.segment_images(['data/T35VME_20200531.tif',
+                    'data/T35VME_20200628.tif',
+                    'data/T35VME_20200718.tif'],
+                   'output/T35VME_seg3.tif')

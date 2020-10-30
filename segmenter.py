@@ -8,25 +8,27 @@ import random
 import cv2 as cv
 
 
-def read_write_test(input_path, output_path):
-    with rasterio.open(input_path) as input_dataset:
-        raster = input_dataset.read()
-        image = reshape_as_image(raster)
+def segment_images(input_paths, output_path):
 
-        segment_mask, edges = segment(image)
-        result = np.append(raster, [segment_mask], axis=0)
+    images = [read_image(input_path) for input_path in input_paths]
+    segment_mask, edges = segment(images)
 
-        profile = input_dataset.profile
-        profile.update(count=4)
+    # lets add segmentation mask to first TIF
+    dataset = rasterio.open(input_paths[0])
+    raster = dataset.read()
+    result = np.append(raster, [segment_mask], axis=0)
 
-        with rasterio.open(output_path, 'w', **profile) as output_dataset:
-            output_dataset.write(result)
+    profile = dataset.profile
+    profile.update(count=4)
 
+    with rasterio.open(output_path, 'w', **profile) as output_dataset:
+        output_dataset.write(result)
 
 def segment(images):
     edges = []
     for image in images:
-        edges.append(cv.Canny(image, 50, 100, L2gradient=True))
+        edge = cv.Canny(image, 50, 100)
+        edges.append(edge)
 
     edges_combined = edges[0]
     for edge in edges[1:]:
