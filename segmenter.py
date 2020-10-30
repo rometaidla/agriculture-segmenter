@@ -3,7 +3,6 @@ import rasterio.features
 import rasterio.warp
 from rasterio.plot import reshape_as_image
 import numpy as np
-from skimage import feature
 from matplotlib import pyplot as plt
 import random
 import cv2 as cv
@@ -13,7 +12,6 @@ def read_write_test(input_path, output_path):
     with rasterio.open(input_path) as input_dataset:
         raster = input_dataset.read()
         image = reshape_as_image(raster)
-        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         segment_mask, edges = segment(image)
         result = np.append(raster, [segment_mask], axis=0)
@@ -25,57 +23,45 @@ def read_write_test(input_path, output_path):
             output_dataset.write(result)
 
 
-def segment(image):
-    # to black and white
-    bw = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+def segment(images):
+    edges = []
+    for image in images:
+        edges.append(cv.Canny(image, 50, 100, L2gradient=True))
 
-    # detect edges
-    edges = feature.canny(bw, sigma=0.2)
-    edges = edges.astype('uint8')
+    edges_combined = edges[0]
+    for edge in edges[1:]:
+        edges_combined = cv.bitwise_or(edges_combined, edge)
 
     # Threshold to obtain the peaks
     # This will be the markers for the foreground objects
-    _, dist = cv.threshold(edges, 0.4, 1.0, cv.THRESH_BINARY)
+    _, threshold = cv.threshold(edges_combined, 0.4, 1.0, cv.THRESH_BINARY)
     # Dilate a bit the dist image
-    kernel1 = np.ones((3, 3), dtype=np.uint8)
-    dist = cv.dilate(dist, kernel1)
-    dist = cv.bitwise_not(dist) - 254
+    kernel1 = np.ones((2, 2), dtype=np.uint8)
+    dilate = cv.dilate(threshold, kernel1)
+    dilate = cv.bitwise_not(dilate) - 254
 
-    dist = cv.distanceTransform(dist, cv.DIST_L2, 3)
-    # Normalize the distance image for range = {0.0, 1.0}
-    # so we can visualize and threshold it
-    # cv.normalize(dist, dist, 0, 1.0, cv.NORM_MINMAX)
+    dist = cv.distanceTransform(dilate, cv.DIST_L2, 3)
+    segments = watershed(dist, images[0])  # TODO: fix passing image here
 
-    # watershed
-    dist_8u = dist.astype('uint8')
+    return segments, edges_combined
+
+
+def watershed(distance_image, image):
+    dist_8u = distance_image.astype('uint8')
     # Find total markers
     contours, _ = cv.findContours(dist_8u, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     # Create the marker image for the watershed algorithm
-    markers = np.zeros(dist.shape, dtype=np.int32)
+    markers = np.zeros(distance_image.shape, dtype=np.int32)
     # Draw the foreground markers
     for i in range(len(contours)):
         cv.drawContours(markers, contours, i, (i + 1), -1)
     # Draw the background marker
     cv.circle(markers, (5, 5), 3, (255, 255, 255), -1)
-    # cv.imshow('Markers', markers*10000)
-    labels = cv.watershed(image, markers)
-    # mark = np.zeros(markers.shape, dtype=np.uint8)
-    mark = markers.astype('uint8')
-    mark = cv.bitwise_not(mark)
-    # uncomment this if you want to see how the mark
-    # image looks like at that point
-    # plt.imshow(mark)
-    # Generate random colors
-    colors = []
-    cmap = plt.cm.get_cmap('gray', len(contours))
-    for i_label, contour in enumerate(contours):
-        # colors.append((rng.randint(0,256), rng.randint(0,256), rng.randint(0,256)))
-        segment_color = cmap(i_label, alpha=0, bytes=True)
-        colors.append((segment_color[0].item(), segment_color[1].item(), segment_color[2].item()))
+    cv.watershed(image, markers)
 
-    # print(colors)
-    random.shuffle(colors)
-    # print(colors)
+    # Generate random colors
+    colors = generate_colors(len(contours))
+
     # Create the result image
     dst = np.zeros((markers.shape[0], markers.shape[1], 3), dtype=np.uint8)
     # Fill labeled objects with random colors
@@ -87,7 +73,17 @@ def segment(image):
 
     segments = cv.cvtColor(dst, cv.COLOR_BGR2GRAY)
 
-    return segments, edges
+    return segments
+
+def generate_colors(n, cmap='gray'):
+    colors = []
+    cmap = plt.cm.get_cmap(cmap, n)
+    for i_label in range(n):
+        segment_color = cmap(i_label, alpha=0, bytes=True)
+        colors.append((segment_color[0].item(), segment_color[1].item(), segment_color[2].item()))
+
+    random.shuffle(colors)
+    return colors
 
 
 def read_image(image_path):
