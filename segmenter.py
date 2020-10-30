@@ -89,5 +89,4 @@ def generate_colors(n, cmap='gray'):
 def read_image(image_path):
     raster = rasterio.open(image_path).read()
     image = reshape_as_image(raster)
-    image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
     return image
